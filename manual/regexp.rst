@@ -60,7 +60,11 @@ You can of course do that: Just put a backslash in front of any special characte
 So, what are the most useful sets?
 ------------------------------------
 
-Knew you'd ask. Some useful sets are ``[0-9]`` matching a single number, ``[a-z]`` matching a single lowercase letter, ``[A-Z]`` matching a single uppercase letter, ``[a-zA-Z]`` matching a single letter and ``[a-zA-Z0-9]`` matching a single letter or number. You can also use an escape sequence as shorthand:
+Knew you'd ask. Some useful sets are ``[0-9]`` matching a single number,
+``[a-z]`` matching a single lowercase letter, ``[A-Z]`` matching a single
+uppercase letter, ``[a-zA-Z]`` matching a single letter and ``[a-zA-Z0-9]``
+matching a single letter or number. You can also use an escape sequence as
+shorthand:
 
 ``\d``
     is equivalent to ``[0-9]``
@@ -75,7 +79,16 @@ Knew you'd ask. Some useful sets are ``[0-9]`` matching a single number, ``[a-z]
 .. note::
     "Whitespace" is a term for anything that won't be printed. These characters include space, tabulator, line feed, form feed, carriage return, non-breaking spaces, etc.
 
+.. note::
+   The upper and lower case sets may match both upper and lowercase if the
+   setting to make searches case insensitive is enabled. Such settings are
+   found, for instance in Preferences->Searching in calibre itself and on the
+   Search panel in the calibre :guilabel:`E-book viewer` as well as the calibre :guilabel:`Edit
+   book` tool.
+
 As a last note on sets, you can also define a set as any character *but* those in the set. You do that by including the character ``"^"`` as the *very first character in the set*. Thus, ``[^a]`` would match any character excluding "a". That's called complementing the set. Those escape sequence shorthands we saw earlier can also be complemented: ``"\D"`` means any non-number character, thus being equivalent to ``[^0-9]``. The other shorthands can be complemented by, you guessed it, using the respective uppercase letter instead of the lowercase one. So, going back to the example ``<p[^>]*>`` from the previous section, now you can see that the character set it's using tries to match any character except for a closing angle bracket.
+
+
 
 But if I had a few varying strings I wanted to match, things get complicated?
 -------------------------------------------------------------------------------
@@ -119,12 +132,12 @@ Adding books
 ^^^^^^^^^^^^^^^^
 
 Another thing you can use regular expressions for is to extract metadata from filenames. You can find this feature in the "Adding books" part of the settings. There's a special feature here: You can use field names for metadata fields, for example ``(?P<title>)`` would indicate that calibre uses this part of the string as book title. The allowed field names are listed in the windows, together with another nice test field. An example: Say you want to import a whole bunch of files named like ``Classical Texts: The Divine Comedy by Dante Alighieri.mobi``.
-(Obviously, this is already in your library, since we all love classical italian poetry) or ``Science Fiction epics: The Foundation Trilogy by Isaac Asimov.epub``. This is obviously a naming scheme that calibre won't extract any meaningful data out of - its standard expression for extracting metadata is ``(?P<title>.+) - (?P<author>[^_]+)``. A regular expression that works here would be ``[a-zA-Z]+: (?P<title>.+) by (?P<author>.+)``. Please note that, inside the group for the metadata field, you need to use expressions to describe what the field actually matches. And also note that, when using the test field calibre provides, you need to add the file extension to your testing filename, otherwise you won't get any matches at all, despite using a working expression.
+(Obviously, this is already in your library, since we all love classical Italian poetry) or ``Science Fiction epics: The Foundation Trilogy by Isaac Asimov.epub``. This is obviously a naming scheme that calibre won't extract any meaningful data out of - its standard expression for extracting metadata is ``(?P<title>.+) - (?P<author>[^_]+)``. A regular expression that works here would be ``[a-zA-Z]+: (?P<title>.+) by (?P<author>.+)``. Please note that, inside the group for the metadata field, you need to use expressions to describe what the field actually matches. And also note that, when using the test field calibre provides, you need to add the file extension to your testing filename, otherwise you won't get any matches at all, despite using a working expression.
 
 Bulk editing metadata
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-The last part is regular expression :guilabel:`Search and replace` in metadata fields. You can access this by selecting multiple books in the library and using bulk metadata edit. Be very careful when using this last feature, as it can do **Very Bad Things** to your library! Doublecheck that your expressions do what you want them to using the test fields, and only mark the books you really want to change! In the regular expression search mode, you can search in one field, replace the text with something and even write the result into another field. A practical example: Say your library contained the books of Frank Herbert's Dune series, named after the fashion ``Dune 1 - Dune``, ``Dune 2 - Dune Messiah`` and so on. Now you want to get ``Dune`` into the series field. You can do that by searching for ``(.*?) \d+ - .*`` in the title field and replacing it with ``\1`` in the series field. See what I did there? That's a reference to the first group you're replacing the series field with. Now that you have the series all set, you only need to do another search for ``.*? -`` in the title field and replace it with ``""`` (an empty string), again in the title field, and your metadata is all neat and tidy. Isn't that great? By the way, instead of replacing the entire field, you can also append or prepend to the field, so, if you *wanted* the book title to be prepended with series info, you could do that as well. As you by now have undoubtedly noticed, there's a checkbox labeled :guilabel:`Case sensitive`, so you won't have to use flags to select behaviour here.
+The last part is regular expression :guilabel:`Search and replace` in metadata fields. You can access this by selecting multiple books in the library and using bulk metadata edit. Be very careful when using this last feature, as it can do **Very Bad Things** to your library! Double-check that your expressions do what you want them to using the test fields, and only mark the books you really want to change! In the regular expression search mode, you can search in one field, replace the text with something and even write the result into another field. A practical example: Say your library contained the books of Frank Herbert's Dune series, named after the fashion ``Dune 1 - Dune``, ``Dune 2 - Dune Messiah`` and so on. Now you want to get ``Dune`` into the series field. You can do that by searching for ``(.*?) \d+ - .*`` in the title field and replacing it with ``\1`` in the series field. See what I did there? That's a reference to the first group you're replacing the series field with. Now that you have the series all set, you only need to do another search for ``.*? -`` in the title field and replace it with ``""`` (an empty string), again in the title field, and your metadata is all neat and tidy. Isn't that great? By the way, instead of replacing the entire field, you can also append or prepend to the field, so, if you *wanted* the book title to be prepended with series info, you could do that as well. As you by now have undoubtedly noticed, there's a checkbox labeled :guilabel:`Case sensitive`, so you won't have to use flags to select behaviour here.
 
 Well, that just about concludes the very short introduction to regular expressions. Hopefully I'll have shown you enough to at least get you started and to enable you to continue learning by yourself- a good starting point would be the `Python documentation for regexps <https://docs.python.org/library/re.html>`_.
 

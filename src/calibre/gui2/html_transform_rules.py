@@ -1,35 +1,32 @@
 #!/usr/bin/env python
 # License: GPLv3 Copyright: 2016, Kovid Goyal <kovid at kovidgoyal.net>
 
+from typing import TYPE_CHECKING, Any
 
-from qt.core import (
-    QComboBox, QFrame, QHBoxLayout, QIcon, QLabel, QLineEdit, QPushButton,
-    QScrollArea, Qt, QToolButton, QVBoxLayout, QWidget, pyqtSignal
-)
+from qt.core import QComboBox, QFrame, QHBoxLayout, QIcon, QLabel, QLineEdit, QPushButton, QScrollArea, Qt, QToolButton, QVBoxLayout, QWidget, pyqtSignal
 
 from calibre import prepare_string_for_xml
-from calibre.ebooks.html_transform_rules import (
-    ACTION_MAP, MATCH_TYPE_MAP, export_rules, import_rules, transform_html,
-    validate_rule
-)
+from calibre.ebooks.html_transform_rules import ACTION_MAP, MATCH_TYPE_MAP, export_rules, import_rules, transform_html, validate_rule
 from calibre.gui2 import elided_text, error_dialog
 from calibre.gui2.convert.xpath_wizard import XPathEdit
-from calibre.gui2.css_transform_rules import (
-    RulesWidget as RulesWidgetBase, Tester as TesterBase
-)
-from calibre.gui2.tag_mapper import (
-    RuleEditDialog as RuleEditDialogBase, RuleItem as RuleItemBase,
-    Rules as RulesBase, RulesDialog as RulesDialogBase
-)
+from calibre.gui2.css_transform_rules import RulesWidget as RulesWidgetBase
+from calibre.gui2.css_transform_rules import Tester as TesterBase
+from calibre.gui2.tag_mapper import RuleEditDialog as RuleEditDialogBase
+from calibre.gui2.tag_mapper import RuleItem as RuleItemBase
+from calibre.gui2.tag_mapper import Rules as RulesBase
+from calibre.gui2.tag_mapper import RulesDialog as RulesDialogBase
+from calibre.utils.localization import _
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 # Classes for rule edit widget {{{
 
 
 class TagAction(QWidget):
-
     remove_action = pyqtSignal(object)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.l = l = QVBoxLayout(self)
         self.h = h = QHBoxLayout()
@@ -56,7 +53,7 @@ class TagAction(QWidget):
         l.addLayout(h)
 
         self.remove_button = b = QToolButton(self)
-        b.setToolTip(_('Remove this action')), b.setIcon(QIcon(I('minus.png')))
+        b.setToolTip(_('Remove this action')), b.setIcon(QIcon.ic('minus.png'))
         b.clicked.connect(self.request_remove)
         h.addWidget(b)
         self.action_desc = la = QLabel('')
@@ -68,7 +65,7 @@ class TagAction(QWidget):
         l.addWidget(sep)
         self.update_state()
 
-    def request_remove(self):
+    def request_remove(self) -> None:
         self.remove_action.emit(self)
 
     @property
@@ -76,7 +73,7 @@ class TagAction(QWidget):
         return {'type': self.action_type.currentData(), 'data': self.action_data.text()}
 
     @as_dict.setter
-    def as_dict(self, val):
+    def as_dict(self, val) -> None:
         self.action_data.setText(val.get('data') or '')
         at = val.get('type')
         if at:
@@ -84,7 +81,7 @@ class TagAction(QWidget):
             if idx > -1:
                 self.action_type.setCurrentIndex(idx)
 
-    def update_state(self):
+    def update_state(self) -> None:
         val = self.as_dict
         ac = ACTION_MAP[val['type']]
         self.action_desc.setText(ac.long_text)
@@ -96,29 +93,28 @@ class TagAction(QWidget):
 
 
 class ActionsContainer(QScrollArea):
-
-    def __init__(self, parent=None):
+    def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWidgetResizable(True)
         self.w = w = QWidget()
         self.setWidget(w)
-        w.l = QVBoxLayout(w)
-        w.l.addStretch(1)
+        self.w_layout = QVBoxLayout(w)
+        self.w_layout.addStretch(1)
         self.all_actions = []
         self.new_action()
 
     def new_action(self):
         a = TagAction(self)
         self.all_actions.append(a)
-        l = self.w.l
+        l = self.w_layout
         a.remove_action.connect(self.remove_action)
         l.insertWidget(l.count() - 1, a)
         a.action_type.setFocus(Qt.FocusReason.OtherFocusReason)
         return a
 
-    def remove_action(self, ac):
+    def remove_action(self, ac) -> None:
         if ac in self.all_actions:
-            self.w.l.removeWidget(ac)
+            self.w_layout.removeWidget(ac)
             del self.all_actions[self.all_actions.index(ac)]
             ac.deleteLater()
 
@@ -132,7 +128,7 @@ class ActionsContainer(QScrollArea):
         return [t.as_dict for t in self.all_actions]
 
     @as_list.setter
-    def as_list(self, val):
+    def as_list(self, val) -> None:
         for ac in tuple(self.all_actions):
             self.remove_action(ac)
         for entry in val:
@@ -140,8 +136,7 @@ class ActionsContainer(QScrollArea):
 
 
 class GenericEdit(QLineEdit):
-
-    def __init__(self, parent=None):
+    def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setClearButtonEnabled(True)
 
@@ -150,13 +145,12 @@ class GenericEdit(QLineEdit):
         return self.text()
 
     @value.setter
-    def value(self, val):
+    def value(self, val) -> None:
         self.setText(str(val))
 
 
 class CSSEdit(QWidget):
-
-    def __init__(self, parent=None):
+    def __init__(self, parent=None) -> None:
         super().__init__(parent)
         l = QHBoxLayout(self)
         l.setContentsMargins(0, 0, 0, 0)
@@ -173,16 +167,17 @@ class CSSEdit(QWidget):
         return self.edit.value
 
     @value.setter
-    def value(self, val):
+    def value(self, val) -> None:
         self.edit.value = val
+
+
 # }}}
 
 
 class RuleEdit(QWidget):  # {{{
-
     MSG = _('Create the rule to transform HTML tags below')
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None) -> None:
         QWidget.__init__(self, parent)
         self.l = l = QVBoxLayout(self)
         self.h = h = QHBoxLayout()
@@ -215,10 +210,10 @@ class RuleEdit(QWidget):  # {{{
 
         self.thenl = QLabel(_('Then:'))
         l.addWidget(self.thenl)
-        self.actions = a = ActionsContainer(self)
+        self.actions_container = a = ActionsContainer(self)
         l.addWidget(a)
-        self.add_button = b = QPushButton(QIcon(I('plus.png')), _('Add another action'))
-        b.clicked.connect(self.actions.new_action)
+        self.add_button = b = QPushButton(QIcon.ic('plus.png'), _('Add another action'))
+        b.clicked.connect(self.actions_container.new_action)
         l.addWidget(b)
         self.update_state()
 
@@ -232,7 +227,7 @@ class RuleEdit(QWidget):  # {{{
     def current_query_widget(self):
         return {'css': self.css_query, 'xpath': self.xpath_query}.get(self.match_type.currentData(), self.generic_query)
 
-    def update_state(self):
+    def update_state(self) -> None:
         r = self.rule
         mt = r['match_type']
         self.generic_query.setVisible(False), self.css_query.setVisible(False), self.xpath_query.setVisible(False)
@@ -245,49 +240,62 @@ class RuleEdit(QWidget):  # {{{
             return {
                 'match_type': self.match_type.currentData(),
                 'query': self.current_query_widget.value,
-                'actions': self.actions.as_list,
+                'actions': self.actions_container.as_list,
             }
         except Exception:
             import traceback
+
             traceback.print_exc()
             raise
 
     @rule.setter
-    def rule(self, rule):
-        def sc(name):
+    def rule(self, rule) -> None:
+        def sc(name) -> None:
             c = getattr(self, name)
             c.setCurrentIndex(max(0, c.findData(str(rule.get(name, '')))))
+
         sc('match_type')
         self.current_query_widget.value = str(rule.get('query', '')).strip()
-        self.actions.as_list = rule.get('actions') or []
+        self.actions_container.as_list = rule.get('actions') or []
         self.update_state()
 
-    def validate(self):
+    def validate(self) -> bool:
         rule = self.rule
         title, msg = validate_rule(rule)
         if msg is not None and title is not None:
             error_dialog(self, title, msg, show=True)
             return False
         return True
+
+
 # }}}
 
 
 class RuleEditDialog(RuleEditDialogBase):  # {{{
-
     PREFS_NAME = 'edit-html-transform-rule'
     DIALOG_TITLE = _('Edit rule')
     RuleEditClass = RuleEdit
+
+
 # }}}
 
 
 class RuleItem(RuleItemBase):  # {{{
+    @staticmethod
+    def search_values_from_rule(rule: dict[str, Any]) -> Iterator[str]:
+        if isinstance(val := rule.get('query'), str):
+            yield val
+        for action in rule.get('actions') or ():
+            if isinstance(val := action.get('data'), str):
+                yield val
 
     @staticmethod
     def text_from_rule(rule, parent):
         try:
             query = elided_text(rule['query'], font=parent.font(), width=200, pos='right')
             text = _('If the tag <b>{match_type}</b> <b>{query}</b>').format(
-                match_type=MATCH_TYPE_MAP[rule['match_type']].text, query=prepare_string_for_xml(query))
+                match_type=MATCH_TYPE_MAP[rule['match_type']].text, query=prepare_string_for_xml(query)
+            )
             for action in rule['actions']:
                 text += '<br>' + ACTION_MAP[action['type']].short_text
                 if action.get('data'):
@@ -295,41 +303,44 @@ class RuleItem(RuleItemBase):  # {{{
                     text += f' <code>{prepare_string_for_xml(ad)}</code>'
         except Exception:
             import traceback
+
             traceback.print_exc()
             text = _('This rule is invalid, please remove it')
         return text
+
+
 # }}}
 
 
 class Rules(RulesBase):  # {{{
-
     RuleItemClass = RuleItem
     RuleEditDialogClass = RuleEditDialog
     ACTION_KEY = 'actions'
-    MSG = _('You can specify rules to transform HTML here. Click the "Add rule" button'
-            ' below to get started.')
+    MSG = _('You can specify rules to transform HTML here. Click the "Add rule" button below to get started.')
+
+
 # }}}
 
 
 class Tester(TesterBase):  # {{{
-
     DIALOG_TITLE = _('Test HTML transform rules')
     PREFS_NAME = 'test-html-transform-rules'
     LABEL = _('Enter an HTML document below and click the "Test" button')
     SYNTAX = 'html'
-    RESULTS = '<!-- %s -->\n\n' % _('Resulting HTML')
+    RESULTS = '<!-- {} -->\n\n'.format(_('Resulting HTML'))
 
     def compile_rules(self, rules):
         return rules
 
-    def do_test(self):
+    def do_test(self) -> None:
         changed, html = transform_html('\n' + self.value + '\n', self.rules)
         self.set_result(html)
+
+
 # }}}
 
 
 class RulesDialog(RulesDialogBase):  # {{{
-
     DIALOG_TITLE = _('Edit HTML transform rules')
     PREFS_NAME = 'edit-html-transform-rules'
     PREFS_OBJECT_NAME = 'html-transform-rules'
@@ -349,9 +360,10 @@ class RulesDialog(RulesDialogBase):  # {{{
         return self.scope_cb.currentData()
 
     @transform_scope.setter
-    def transform_scope(self, val):
+    def transform_scope(self, val) -> None:
         idx = self.scope_cb.findData(val)
         self.scope_cb.setCurrentIndex(max(0, idx))
+
 
 # }}}
 
@@ -360,21 +372,24 @@ class HtmlRulesWidget(RulesWidgetBase):  # {{{
     PREFS_NAME = 'html-transform-rules'
     INITIAL_FILE_NAME = 'html-rules.txt'
     DIR_SAVE_NAME = 'export-html-transform-rules'
-    export_func = export_rules
-    import_func = import_rules
+    export_func = export_rules  # ty: ignore[invalid-method-override] HTML rules have a different type than CSS rules
+    import_func = import_rules  # ty: ignore[invalid-method-override] HTML rules have a different type than CSS rules
     TesterClass = Tester
     RulesClass = Rules
-# }}}
 
+
+# }}}
 
 if __name__ == '__main__':
     from calibre.gui2 import Application
+
     app = Application([])
     d = RulesDialog()
     d.rules = [
-        {'match_type':'xpath', 'query':'//h:h2', 'actions':[{'type': 'remove'}]},
+        {'match_type': 'xpath', 'query': '//h:h2', 'actions': [{'type': 'remove'}]},
     ]
     d.exec()
     from pprint import pprint
+
     pprint(d.rules)
     del d, app

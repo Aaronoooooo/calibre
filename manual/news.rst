@@ -138,7 +138,7 @@ This can be removed by adding::
 
     remove_tags    = [dict(name='div', attrs={'class':'footer'})]
 
-to the recipe. Finally, lets replace some of the :term:`CSS` that we disabled earlier, with our own :term:`CSS` that is suitable for conversion to an e-book::
+to the recipe. Finally, let's replace some of the :term:`CSS` that we disabled earlier, with our own :term:`CSS` that is suitable for conversion to an e-book::
 
     extra_css      = '.headline {font-size: x-large;} \n .fact { padding-top: 10pt  }'
 
@@ -175,7 +175,7 @@ A reasonably complex real life example that exposes more of the :term:`API` of `
        extra_css = 'h1 {font: sans-serif large;}\n.byline {font:monospace;}'
 
        def get_browser(self):
-           br = BasicNewsRecipe.get_browser()
+           br = BasicNewsRecipe.get_browser(self)
            if self.username is not None and self.password is not None:
                br.open('https://www.nytimes.com/auth/login')
                br.select_form(name='login')
@@ -262,9 +262,9 @@ The next interesting feature is::
 The next new feature is the
 :meth:`calibre.web.feeds.news.BasicNewsRecipe.parse_index` method. Its job is
 to go to https://www.nytimes.com/pages/todayspaper/index.html and fetch the list
-of articles that appear in *todays* paper. While more complex than simply using
+of articles that appear in *today's* paper. While more complex than simply using
 :term:`RSS`, the recipe creates an e-book that corresponds very closely to the
-days paper. ``parse_index`` makes heavy use of `BeautifulSoup
+day's paper. ``parse_index`` makes heavy use of `BeautifulSoup
 <https://www.crummy.com/software/BeautifulSoup/bs4/doc/>`_ to parse
 the daily paper webpage. You can also use other, more modern parsers if you
 dislike BeautifulSoup. calibre comes with `lxml <https://lxml.de/>`_ and

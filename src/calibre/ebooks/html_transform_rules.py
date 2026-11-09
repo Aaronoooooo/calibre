@@ -1,30 +1,58 @@
 #!/usr/bin/env python
 # License: GPLv3 Copyright: 2016, Kovid Goyal <kovid at kovidgoyal.net>
 
-
 import re
 from functools import partial
+from typing import TYPE_CHECKING, TypedDict, cast
+
+from css_selectors.select import Select, get_parsed_selector
 from html5_parser import parse
 from lxml import etree
 
-from calibre.ebooks.oeb.parse_utils import XHTML
-from calibre.ebooks.oeb.base import OEB_DOCS, XPath
 from calibre.ebooks.metadata.tag_mapper import uniq
-from css_selectors.select import Select, get_parsed_selector
+from calibre.ebooks.oeb.base import OEB_DOCS, XPath
+from calibre.ebooks.oeb.parse_utils import XHTML
+from calibre.utils.localization import _
+
+if TYPE_CHECKING:
+    import unittest
+    from collections.abc import Callable, Collection, Iterable, Iterator
+
+    from calibre.ebooks.oeb.base import OEBBook
+    from calibre.ebooks.oeb.polish.container import Container
+
+    type Validator = Callable[[str], str | None]
+    type TagAction = Callable[[etree._Element], bool]
 
 
-def non_empty_validator(label, val):
+class SerializedAction(TypedDict, total=False):
+    type: str
+    data: str
+
+
+class SerializedRule(TypedDict, total=False):
+    match_type: str
+    query: str
+    actions: list[SerializedAction]
+
+
+class StartTag(TypedDict):
+    # the type of _Element.tag: if the user's text starts with a comment this is not a str and wrap() fails when applied
+    tag: str | bytes | bytearray | etree.QName
+    attrib: list[tuple[str, str]]
+
+
+def non_empty_validator(label: str, val: str) -> str | None:
     if not val:
         return _('{} must not be empty').format(label)
 
 
-def always_valid(*a):
+def always_valid(*a: object) -> None:
     pass
 
 
 class Action:
-
-    def __init__(self, name, short_text, long_text, placeholder='', validator=None):
+    def __init__(self, name: str, short_text: str, long_text: str, placeholder: str = '', validator: Validator | None = None) -> None:
         self.name = name
         self.short_text = short_text
         self.long_text = long_text
@@ -34,50 +62,89 @@ class Action:
         self.validator = validator or always_valid
 
 
-ACTION_MAP = {a.name: a for a in (
-    Action('rename', _('Change tag name'), _('Rename tag to the specified name'), _('New tag name')),
-    Action('remove', _('Remove tag and children'), _('Remove the tag and all its contents')),
-    Action('unwrap', _('Remove tag only'), _('Remove the tag but keep its contents')),
-    Action('add_classes', _('Add classes'), _('Add the specified classes, e.g.:') + ' bold green', _('Space separated class names')),
-    Action('remove_classes', _('Remove classes'), _('Remove the specified classes, e.g.:') + ' bold green', _('Space separated class names')),
-    Action('remove_attrs', _('Remove attributes'), _(
-        'Remove the specified attributes from the tag. Multiple attribute names should be separated by spaces.'
-        ' The special value * removes all attributes.'), _('Space separated attribute names')),
-    Action('add_attrs', _('Add attributes'), _('Add the specified attributes, e.g.:') + ' class="red" name="test"', _('Space separated attribute names')),
-    Action('empty', _('Empty the tag'), _('Remove all contents from the tag')),
-    Action('wrap', _('Wrap the tag'), _(
-        'Wrap the tag in the specified tag, e.g.: {0} will wrap the tag in a DIV tag with class {1}').format(
-            '&lt;div class="box"&gt;', 'box'), _('An HTML opening tag')),
-    Action('insert', _('Insert HTML at start'), _(
-        'The specified HTML snippet is inserted after the opening tag. Note that only valid HTML snippets can be used without unclosed tags'),
-           _('HTML snippet')),
-    Action('insert_end', _('Insert HTML at end'), _(
-        'The specified HTML snippet is inserted before the closing tag. Note that only valid HTML snippets can be used without unclosed tags'),
-           _('HTML snippet')),
-    Action('prepend', _('Insert HTML before tag'), _(
-        'The specified HTML snippet is inserted before the opening tag. Note that only valid HTML snippets can be used without unclosed tags'),
-           _('HTML snippet')),
-    Action('append', _('Insert HTML after tag'), _(
-        'The specified HTML snippet is inserted after the closing tag. Note that only valid HTML snippets can be used without unclosed tags'),
-           _('HTML snippet')),
-)}
+ACTION_MAP = {
+    a.name: a
+    for a in (
+        Action('rename', _('Change tag name'), _('Rename tag to the specified name'), _('New tag name')),
+        Action('remove', _('Remove tag and children'), _('Remove the tag and all its contents')),
+        Action('unwrap', _('Remove tag only'), _('Remove the tag but keep its contents')),
+        Action(
+            'add_classes',
+            _('Add classes'),
+            _('Add the specified classes, e.g.:') + ' bold green',
+            _('Space separated class names'),
+        ),
+        Action(
+            'remove_classes',
+            _('Remove classes'),
+            _('Remove the specified classes, e.g.:') + ' bold green',
+            _('Space separated class names'),
+        ),
+        Action(
+            'remove_attrs',
+            _('Remove attributes'),
+            _(
+                'Remove the specified attributes from the tag. Multiple attribute names should be separated by spaces.'
+                ' The special value * removes all attributes.'
+            ),
+            _('Space separated attribute names'),
+        ),
+        Action(
+            'add_attrs',
+            _('Add attributes'),
+            _('Add the specified attributes, e.g.:') + ' class="red" name="test"',
+            _('Space separated attribute names'),
+        ),
+        Action('empty', _('Empty the tag'), _('Remove all contents from the tag')),
+        Action(
+            'wrap',
+            _('Wrap the tag'),
+            _('Wrap the tag in the specified tag, e.g.: {0} will wrap the tag in a DIV tag with class {1}').format('&lt;div class="box"&gt;', 'box'),
+            _('An HTML opening tag'),
+        ),
+        Action(
+            'insert',
+            _('Insert HTML at start'),
+            _('The specified HTML snippet is inserted after the opening tag. Note that only valid HTML snippets can be used without unclosed tags'),
+            _('HTML snippet'),
+        ),
+        Action(
+            'insert_end',
+            _('Insert HTML at end'),
+            _('The specified HTML snippet is inserted before the closing tag. Note that only valid HTML snippets can be used without unclosed tags'),
+            _('HTML snippet'),
+        ),
+        Action(
+            'prepend',
+            _('Insert HTML before tag'),
+            _('The specified HTML snippet is inserted before the opening tag. Note that only valid HTML snippets can be used without unclosed tags'),
+            _('HTML snippet'),
+        ),
+        Action(
+            'append',
+            _('Insert HTML after tag'),
+            _('The specified HTML snippet is inserted after the closing tag. Note that only valid HTML snippets can be used without unclosed tags'),
+            _('HTML snippet'),
+        ),
+    )
+}
 
 
-def validate_action(action):
+def validate_action(action: SerializedAction) -> str | None:
     if set(action) != {'type', 'data'}:
         return _('Action must have both:') + ' type and data'
     a = ACTION_MAP[action['type']]
     return a.validator(action['data'])
 
 
-def validate_css_selector(val):
+def validate_css_selector(val: str) -> str | None:
     try:
         get_parsed_selector(val)
     except Exception:
         return _('{} is not a valid CSS selector').format(val)
 
 
-def validate_xpath_selector(val):
+def validate_xpath_selector(val: str) -> str | None:
     try:
         XPath(val)
     except Exception:
@@ -85,8 +152,7 @@ def validate_xpath_selector(val):
 
 
 class Match:
-
-    def __init__(self, name, text, placeholder='', validator=None):
+    def __init__(self, name: str, text: str, placeholder: str = '', validator: Validator | None = None) -> None:
         self.name = name
         self.text = text
         self.placeholder = placeholder
@@ -95,35 +161,34 @@ class Match:
         self.validator = validator or always_valid
 
 
-MATCH_TYPE_MAP = {m.name: m for m in (
-    Match('is', _('is'), _('Tag name')),
-    Match('has_class', _('has class'), _('Class name')),
-    Match('not_has_class', _('does not have class'), _('Class name')),
-    Match('css', _('matches CSS selector'), _('CSS selector'), validate_css_selector),
-    Match('xpath', _('matches XPath selector'), _('XPath selector'), validate_xpath_selector),
-    Match('*', _('is any tag')),
-    Match('contains_text', _('contains text'), _('Text')),
-)}
+MATCH_TYPE_MAP = {
+    m.name: m
+    for m in (
+        Match('is', _('is'), _('Tag name')),
+        Match('has_class', _('has class'), _('Class name')),
+        Match('not_has_class', _('does not have class'), _('Class name')),
+        Match('css', _('matches CSS selector'), _('CSS selector'), validate_css_selector),
+        Match('xpath', _('matches XPath selector'), _('XPath selector'), validate_xpath_selector),
+        Match('*', _('is any tag')),
+        Match('contains_text', _('contains text'), _('Text')),
+    )
+}
 allowed_keys = frozenset('match_type query actions'.split())
 
 
-def validate_rule(rule):
+def validate_rule(rule: SerializedRule) -> tuple[str, str] | tuple[None, None]:
     keys = frozenset(rule)
     extra = keys - allowed_keys
     if extra:
-        return _('Unknown keys'), _(
-            'The rule has unknown keys: %s') % ', '.join(extra)
+        return _('Unknown keys'), _('The rule has unknown keys: %s') % ', '.join(extra)
     missing = allowed_keys - keys
     if missing:
-        return _('Missing keys'), _(
-            'The rule has missing keys: %s') % ', '.join(missing)
+        return _('Missing keys'), _('The rule has missing keys: %s') % ', '.join(missing)
     mt = rule['match_type']
     if mt not in MATCH_TYPE_MAP:
-        return _('Unknown match type'), _(
-            'The match type %s is not known') % mt
+        return _('Unknown match type'), _('The match type %s is not known') % mt
     if mt != '*' and not rule['query']:
-        _('Query required'), _(
-            'You must specify a value for the tag to match')
+        return _('Query required'), _('You must specify a value for the tag to match')
     m = MATCH_TYPE_MAP[rule['match_type']]
     err = m.validator(rule.get('query') or '')
     if err:
@@ -137,21 +202,21 @@ def validate_rule(rule):
     return None, None
 
 
-def rename_tag(new_name, tag):
+def rename_tag(new_name: str, tag: etree._Element) -> bool:
     if new_name != tag.tag:
         tag.tag = new_name
         return True
     return False
 
 
-def qualify_tag_name(name):
+def qualify_tag_name(name: str) -> str:
     return XHTML(name)
 
 
-def remove_tag(tag):
-    p = tag.getparent()
+def remove_tag(tag: etree._Element) -> bool:
+    p = cast('etree._Element', tag.getparent())  # the root has no parent and raises AttributeError as before
     idx = p.index(tag)
-    sibling = p[idx-1] if idx else None
+    sibling = p[idx - 1] if idx else None
     p.remove(tag)
     if tag.tail:
         if sibling is None:
@@ -161,10 +226,10 @@ def remove_tag(tag):
     return True
 
 
-def unwrap_tag(tag):
-    p = tag.getparent()
+def unwrap_tag(tag: etree._Element) -> bool:
+    p = cast('etree._Element', tag.getparent())  # the root has no parent and raises AttributeError as before
     idx = p.index(tag)
-    sibling = p[idx-1] if idx else None
+    sibling = p[idx - 1] if idx else None
     if tag.text:
         if sibling is None:
             p.text = (p.text or '') + tag.text
@@ -183,7 +248,7 @@ def unwrap_tag(tag):
     return True
 
 
-def add_classes(classes, tag):
+def add_classes(classes: list[str], tag: etree._Element) -> bool:
     orig_cls = tag.get('class', '')
     orig = list(filter(None, str.split(orig_cls)))
     new_cls = ' '.join(uniq(orig + classes))
@@ -193,7 +258,7 @@ def add_classes(classes, tag):
     return False
 
 
-def remove_classes(classes, tag):
+def remove_classes(classes: list[str], tag: etree._Element) -> bool:
     orig_cls = tag.get('class', '')
     orig = list(filter(None, str.split(orig_cls)))
     for x in classes:
@@ -209,7 +274,7 @@ def remove_classes(classes, tag):
     return False
 
 
-def remove_attrs(attrs, tag):
+def remove_attrs(attrs: list[str], tag: etree._Element) -> bool:
     changed = False
     if not tag.attrib:
         return False
@@ -217,67 +282,69 @@ def remove_attrs(attrs, tag):
         if a == '*':
             changed = True
             tag.attrib.clear()
-        else:
-            if tag.attrib.pop(a, None) is not None:
-                changed = True
+        elif tag.attrib.pop(a, None) is not None:
+            changed = True
     return changed
 
 
-def parse_attrs(text):
+def parse_attrs(text: str) -> list[tuple[str, str]]:
     div = parse(f'<div {text} ></div>', fragment_context='div')[0]
     return div.items()
 
 
-def add_attrs(attrib, tag):
+def add_attrs(attrib: list[tuple[str, str]], tag: etree._Element) -> bool:
     orig = tag.items()
     for k, v in attrib:
         tag.set(k, v)
     return orig != tag.items()
 
 
-def empty(tag):
+def empty(tag: etree._Element) -> bool:
     changed = len(tag) > 0 or bool(tag.text)
     tag.text = None
     del tag[:]
     return changed
 
 
-def parse_start_tag(text):
-    tag = parse(text, namespace_elements=True, fragment_context='div')[0]
+def parse_start_tag(text: str) -> StartTag:
+    try:
+        tag = parse(text, namespace_elements=True, fragment_context='div')[0]
+    except IndexError as e:
+        raise ValueError(_('No tag found in: {}. The tag specification must be of the form <tag> for example: <p>')) from e
     return {'tag': tag.tag, 'attrib': tag.items()}
 
 
-def wrap(data, tag):
+def wrap(data: StartTag, tag: etree._Element) -> bool:
     elem = tag.makeelement(data['tag'])
     for k, v in data['attrib']:
         elem.set(k, v)
     elem.tail = tag.tail
     tag.tail = None
-    p = tag.getparent()
+    p = cast('etree._Element', tag.getparent())  # the root has no parent and raises AttributeError as before
     idx = p.index(tag)
     p.insert(idx, elem)
     elem.append(tag)
     return True
 
 
-def parse_html_snippet(text):
+def parse_html_snippet(text: str) -> etree._Element:
     return parse(f'<div>{text}</div>', namespace_elements=True, fragment_context='div')[0]
 
 
-def clone(src_element, target_tree):
+def clone(src_element: etree._Element, target_tree: etree._Element) -> etree._Element:
     if src_element.tag is etree.Comment:
         ans = etree.Comment('')
     else:
         ans = target_tree.makeelement(src_element.tag)
         for k, v in src_element.items():
             ans.set(k, v)
-        ans.extend(src_element)
+        ans.extend(list(src_element))
     ans.text = src_element.text
     ans.tail = src_element.tail
     return ans
 
 
-def insert_snippet(container, before_children, tag):
+def insert_snippet(container: etree._Element, before_children: bool, tag: etree._Element) -> bool:
     if before_children:
         orig_text = tag.text
         tag.text = container.text
@@ -288,7 +355,7 @@ def insert_snippet(container, before_children, tag):
                 if i == 0 and orig_text:
                     c.tail = (c.tail or '') + orig_text
         else:
-            tag.text = (tag.text or '') + orig_text
+            tag.text = (tag.text or '') + (orig_text or '')
     else:
         if container.text:
             if len(tag) > 0:
@@ -301,14 +368,14 @@ def insert_snippet(container, before_children, tag):
     return True
 
 
-def append_snippet(container, before_tag, tag):
-    p = tag.getparent()
+def append_snippet(container: etree._Element, before_tag: bool, tag: etree._Element) -> bool:
+    p = cast('etree._Element', tag.getparent())  # the root has no parent and raises AttributeError as before
     idx = p.index(tag)
     if not before_tag:
         idx += 1
     if container.text:
         if idx:
-            c = p[idx-1]
+            c = p[idx - 1]
             c.tail = (c.tail or '') + container.text
         else:
             p.text = (p.text or '') + container.text
@@ -318,7 +385,7 @@ def append_snippet(container, before_tag, tag):
     return True
 
 
-action_map = {
+action_map: dict[str, Callable[[str], TagAction]] = {
     'rename': lambda data: partial(rename_tag, qualify_tag_name(data)),
     'remove': lambda data: remove_tag,
     'unwrap': lambda data: unwrap_tag,
@@ -335,11 +402,11 @@ action_map = {
 }
 
 
-def create_action(serialized_action):
+def create_action(serialized_action: SerializedAction) -> TagAction:
     return action_map[serialized_action['type']](serialized_action.get('data', ''))
 
 
-def text_as_xpath_literal(text):
+def text_as_xpath_literal(text: str) -> str:
     if '"' in text:
         if "'" not in text:
             return f"'{text}'"
@@ -358,8 +425,7 @@ def text_as_xpath_literal(text):
 
 
 class Rule:
-
-    def __init__(self, serialized_rule):
+    def __init__(self, serialized_rule: SerializedRule) -> None:
         self.sel_type = 'xpath'
         mt = serialized_rule['match_type']
         q = serialized_rule['query']
@@ -376,7 +442,7 @@ class Rule:
             self.css_selector = '.' + q
             self.selector = self.css
         elif mt == 'not_has_class':
-            self.css_selector = f":not(.{q})"
+            self.css_selector = f':not(.{q})'
             self.selector = self.css
         elif mt == 'contains_text':
             self.xpath_selector = XPath(f'//*[contains(text(), {text_as_xpath_literal(q)})]')
@@ -385,13 +451,13 @@ class Rule:
             raise KeyError(f'Unknown match_type: {mt}')
         self.actions = tuple(map(create_action, serialized_rule['actions']))
 
-    def xpath(self, root):
-        return self.xpath_selector(root)
+    def xpath(self, root: etree._Element) -> list[etree._Element]:
+        return cast('list[etree._Element]', self.xpath_selector(root))  # the selectors only select elements
 
-    def css(self, root):
+    def css(self, root: etree._Element) -> tuple[etree._Element, ...]:
         return tuple(Select(root)(self.css_selector))
 
-    def __call__(self, root):
+    def __call__(self, root: etree._Element) -> bool:
         changed = False
         for tag in self.selector(root):
             for action in self.actions:
@@ -400,7 +466,7 @@ class Rule:
         return changed
 
 
-def transform_doc(root, rules):
+def transform_doc(root: etree._Element, rules: Iterable[Rule]) -> bool:
     changed = False
     for rule in rules:
         if rule(root):
@@ -408,20 +474,21 @@ def transform_doc(root, rules):
     return changed
 
 
-def transform_html(html, serialized_rules):
+def transform_html(html: str, serialized_rules: Iterable[SerializedRule]) -> tuple[bool, str]:
     root = parse(html, namespace_elements=True)
     rules = tuple(Rule(r) for r in serialized_rules)
     changed = transform_doc(root, rules)
     return changed, etree.tostring(root, encoding='unicode')
 
 
-def transform_container(container, serialized_rules, names=()):
+def transform_container(container: Container, serialized_rules: Iterable[SerializedRule], names: Collection[str] = ()) -> bool:
     if not names:
         types = OEB_DOCS
-        names = []
+        all_names: list[str] = []
         for name, mt in container.mime_map.items():
             if mt in types:
-                names.append(name)
+                all_names.append(name)
+        names = all_names
 
     doc_changed = False
     rules = tuple(Rule(r) for r in serialized_rules)
@@ -430,6 +497,7 @@ def transform_container(container, serialized_rules, names=()):
         mt = container.mime_map.get(name)
         if mt in OEB_DOCS:
             root = container.parsed(name)
+            assert isinstance(root, etree._Element)  # HTML files are parsed into lxml trees
             if transform_doc(root, rules):
                 container.dirty(name)
                 doc_changed = True
@@ -437,41 +505,40 @@ def transform_container(container, serialized_rules, names=()):
     return doc_changed
 
 
-def transform_conversion_book(oeb, opts, serialized_rules):
+def transform_conversion_book(oeb: OEBBook, opts: object, serialized_rules: Iterable[SerializedRule]) -> None:
     rules = tuple(Rule(r) for r in serialized_rules)
     for item in oeb.spine:
         root = item.data
-        if not hasattr(root, 'xpath'):
+        if not isinstance(root, etree._Element):  # only parsed XML has xpath()
             continue
         transform_doc(root, rules)
 
 
-def rule_to_text(rule):
-    text = _('If the tag {match_type} {query}').format(
-        match_type=MATCH_TYPE_MAP[rule['match_type']].text, query=rule.get('query') or '')
+def rule_to_text(rule: SerializedRule) -> str:
+    text = _('If the tag {match_type} {query}').format(match_type=MATCH_TYPE_MAP[rule['match_type']].text, query=rule.get('query') or '')
     for action in rule['actions']:
         text += '\n'
-        text += _('{action_type} {action_data}').format(
-            action_type=ACTION_MAP[action['type']].short_text, action_data=action.get('data') or '')
+        text += _('{action_type} {action_data}').format(action_type=ACTION_MAP[action['type']].short_text, action_data=action.get('data') or '')
     return text
 
 
-def export_rules(serialized_rules):
-    lines = []
+def export_rules(serialized_rules: Iterable[SerializedRule]) -> bytes:
+    lines: list[str] = []
     for rule in serialized_rules:
         lines.extend('# ' + l for l in rule_to_text(rule).splitlines())
-        lines.extend('{}: {}'.format(k, v.replace('\n', ' ')) for k, v in rule.items() if k in allowed_keys and k != 'actions')
+        # only actions is not a str
+        lines.extend('{}: {}'.format(k, cast('str', v).replace('\n', ' ')) for k, v in rule.items() if k in allowed_keys and k != 'actions')
         for action in rule.get('actions', ()):
             lines.append(f"action: {action['type']}: {action.get('data', '')}")
         lines.append('')
     return '\n'.join(lines).encode('utf-8')
 
 
-def import_rules(raw_data):
-    current_rule = {}
+def import_rules(raw_data: bytes) -> Iterator[SerializedRule]:
+    current_rule: dict[str, str | list[SerializedAction]] = {}
 
-    def sanitize(r):
-        return {k:(r.get(k) or '') for k in allowed_keys}
+    def sanitize(r: dict[str, str | list[SerializedAction]]) -> SerializedRule:
+        return cast('SerializedRule', {k: (r.get(k) or '') for k in allowed_keys})  # the keys are exactly the allowed keys
 
     for line in raw_data.decode('utf-8').splitlines():
         if not line.strip():
@@ -485,7 +552,7 @@ def import_rules(raw_data):
         if len(parts) == 2:
             k, v = parts[0].lower().strip(), parts[1].strip()
             if k == 'action':
-                actions = current_rule.setdefault('actions', [])
+                actions = cast('list[SerializedAction]', current_rule.setdefault('actions', []))  # only set to a list here
                 parts = v.split(':', 1)
                 actions.append({'type': parts[0].strip(), 'data': parts[1].strip() if len(parts) == 2 else ''})
             elif k in allowed_keys:
@@ -494,7 +561,7 @@ def import_rules(raw_data):
         yield sanitize(current_rule)
 
 
-def test(return_tests=False):  # {{{
+def test(return_tests: bool = False) -> unittest.TestSuite | None:  # {{{
     import unittest
 
     class TestTransforms(unittest.TestCase):
@@ -502,24 +569,29 @@ def test(return_tests=False):  # {{{
         maxDiff = None
         ae = unittest.TestCase.assertEqual
 
-        def test_matching(self):
-            root = parse(namespace_elements=True, html='''
+        def test_matching(self) -> None:
+            root = parse(
+                namespace_elements=True,
+                html='''
 <html id='root'>
 <head id='head'></head>
 <body id='body'>
 <p class="one red" id='p1'>simple
 <p class="two green" id='p2'>a'b"c
-''')
+''',
+            )
             all_ids = root.xpath('//*/@id')
 
-            def q(mt, query=''):
-                r = Rule({'match_type': mt, 'query': query, 'actions':[]})
-                ans = []
+            def q(mt: str, query: str = '') -> list[str | None]:
+                r = Rule({'match_type': mt, 'query': query, 'actions': []})
+                ans: list[str | None] = []
                 for tag in r.selector(root):
                     ans.append(tag.get('id'))
                 return ans
 
-            def t(mt, query='', expected=[]):
+            def t(mt: str, query: str = '', expected: list[str] | None = None) -> None:
+                if expected is None:
+                    expected = []
                 self.ae(expected, q(mt, query))
 
             t('*', expected=all_ids)
@@ -534,13 +606,13 @@ def test(return_tests=False):  # {{{
             t('contains_text', 'imple', ['p1'])
             t('contains_text', 'a\'b"c', ['p2'])
 
-        def test_validate_rule(self):
-            def av(match_type='*', query='', atype='remove', adata=''):
-                rule = {'match_type': match_type, 'query': query, 'actions': [{'type': atype, 'data': adata}]}
+        def test_validate_rule(self) -> None:
+            def av(match_type: str = '*', query: str = '', atype: str = 'remove', adata: str = '') -> None:
+                rule: SerializedRule = {'match_type': match_type, 'query': query, 'actions': [{'type': atype, 'data': adata}]}
                 self.ae(validate_rule(rule), (None, None))
 
-            def ai(match_type='*', query='', atype='remove', adata=''):
-                rule = {'match_type': match_type, 'query': query, 'actions': [{'type': atype, 'data': adata}]}
+            def ai(match_type: str = '*', query: str = '', atype: str = 'remove', adata: str = '') -> None:
+                rule: SerializedRule = {'match_type': match_type, 'query': query, 'actions': [{'type': atype, 'data': adata}]}
                 self.assertNotEqual(validate_rule(rule), (None, None))
 
             av()
@@ -548,29 +620,35 @@ def test(return_tests=False):  # {{{
             ai('css', 'p..c')
             av('xpath', '//h:p')
             ai('xpath', '//h:p[')
+            ai('is', '')
             ai(atype='wrap')
 
-        def test_export_import(self):
-            rule = {'match_type': 'is', 'query': 'p', 'actions': [{'type': 'rename', 'data': 'div'}, {'type': 'remove', 'data': ''}]}
+        def test_export_import(self) -> None:
+            rule: SerializedRule = {
+                'match_type': 'is',
+                'query': 'p',
+                'actions': [{'type': 'rename', 'data': 'div'}, {'type': 'remove', 'data': ''}],
+            }
             self.ae(rule, next(iter(import_rules(export_rules([rule])))))
             rule = {'match_type': '*', 'actions': [{'type': 'remove'}]}
-            erule = {'match_type': '*', 'query': '', 'actions': [{'type': 'remove', 'data': ''}]}
+            erule: SerializedRule = {'match_type': '*', 'query': '', 'actions': [{'type': 'remove', 'data': ''}]}
             self.ae(erule, next(iter(import_rules(export_rules([rule])))))
 
-        def test_html_transform_actions(self):
+        def test_html_transform_actions(self) -> None:
             parse('a', fragment_context='div')
 
-            def r(html='<p>hello'):
+            def r(html: str = '<p>hello') -> etree._Element:
                 return parse(namespace_elements=True, html=html)[1]
 
-            def tostring(x, with_tail=True):
+            def tostring(x: etree._Element, with_tail: bool = True) -> str:
                 return etree.tostring(x, encoding='unicode', with_tail=with_tail)
 
-            def ax(x, expected):
+            def ax(x: etree._Element | None, expected: str) -> None:
+                assert x is not None
                 v = tostring(x)
                 self.ae(expected, v.replace(' xmlns="http://www.w3.org/1999/xhtml"', ''))
 
-            def t(name, data=''):
+            def t(name: str, data: str = '') -> TagAction:
                 return action_map[name](data)
 
             p = r()[0]
@@ -623,7 +701,7 @@ def test(return_tests=False):  # {{{
             self.assertTrue(t('add_attrs', "class='c' data-m=n")(p))
             self.ae(p.items(), [('class', 'c'), ('data-m', 'n')])
             p = r('<p a=1>')[0]
-            self.assertTrue(t('add_attrs', "a=2")(p))
+            self.assertTrue(t('add_attrs', 'a=2')(p))
             self.ae(p.items(), [('a', '2')])
 
             p = r('<p>t<span>s')[0]
@@ -640,6 +718,9 @@ def test(return_tests=False):  # {{{
             p = r('<p>hello<span>s')[0]
             self.assertTrue(t('insert', 'text')(p))
             ax(p, '<p>texthello<span>s</span></p>')
+            p = r('<p>')[0]
+            self.assertTrue(t('insert', 'text')(p))
+            ax(p, '<p>text</p>')
 
             p = r('<p>hello<span>s')[0]
             self.assertTrue(t('insert_end', 'text<div><!-- comm -->tail')(p))

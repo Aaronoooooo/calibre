@@ -1,14 +1,12 @@
-'''
+# License: GPLv3 Copyright: 2009, John Schember <john@nachtimwald.com>
+
+"""
 Convert pml markup to and from html
-'''
+"""
 
-__license__   = 'GPL v3'
-__copyright__ = '2009, John Schember <john@nachtimwald.com>'
-__docformat__ = 'restructuredtext en'
-
+import io
 import os
 import re
-import io
 from copy import deepcopy
 
 from calibre import my_unichr, prepare_string_for_xml
@@ -16,7 +14,6 @@ from calibre.ebooks.metadata.toc import TOC
 
 
 class PML_HTMLizer:
-
     STATES = [
         'i',
         'u',
@@ -79,8 +76,14 @@ class PML_HTMLizer:
         'b': ('<span style="font-weight: bold;">', '</span>'),
         'l': ('<span style="font-size: 150%;">', '</span>'),
         'k': ('<span style="font-size: 75%; font-variant: small-caps;">', '</span>'),
-        'FN': ('<br /><br style="page-break-after: always;" /><div id="fn-%s"><p>', '</p><small><a href="#rfn-%s">return</a></small></div>'),
-        'SB': ('<br /><br style="page-break-after: always;" /><div id="sb-%s"><p>', '</p><small><a href="#rsb-%s">return</a></small></div>'),
+        'FN': (
+            '<br /><br style="page-break-after: always;" /><div id="fn-%s"><p>',
+            '</p><small><a href="#rfn-%s">return</a></small></div>',
+        ),
+        'SB': (
+            '<br /><br style="page-break-after: always;" /><div id="sb-%s"><p>',
+            '</p><small><a href="#rsb-%s">return</a></small></div>',
+        ),
     }
 
     CODE_STATES = {
@@ -147,20 +150,26 @@ class PML_HTMLizer:
         'h1': 'h1c',
     }
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.state = {}
         # toc consists of a tuple
         # (level, (href, id, text))
-        self.toc = []
+        self.toc: list[tuple[int | str, tuple[str, str, str]]] = []
         self.file_name = ''
 
-    def prepare_pml(self, pml):
+    def prepare_pml(self, pml: str) -> str:
         # Give Chapters the form \\*='text'text\\*. This is used for generating
         # the TOC later.
-        pml = re.sub(r'(?msu)(?P<c>\\x)(?P<text>.*?)(?P=c)', lambda match: '%s="%s"%s%s' %
-                     (match.group('c'), self.strip_pml(match.group('text')), match.group('text'), match.group('c')), pml)
-        pml = re.sub(r'(?msu)(?P<c>\\X[0-4])(?P<text>.*?)(?P=c)', lambda match: '%s="%s"%s%s' %
-                     (match.group('c'), self.strip_pml(match.group('text')), match.group('text'), match.group('c')), pml)
+        pml = re.sub(
+            r'(?msu)(?P<c>\\x)(?P<text>.*?)(?P=c)',
+            lambda match: '{}="{}"{}{}'.format(match.group('c'), self.strip_pml(match.group('text')), match.group('text'), match.group('c')),
+            pml,
+        )
+        pml = re.sub(
+            r'(?msu)(?P<c>\\X[0-4])(?P<text>.*?)(?P=c)',
+            lambda match: '{}="{}"{}{}'.format(match.group('c'), self.strip_pml(match.group('text')), match.group('text'), match.group('c')),
+            pml,
+        )
 
         # Remove comments
         pml = re.sub(r'(?mus)\\v(?P<text>.*?)\\v', '', pml)
@@ -172,24 +181,30 @@ class PML_HTMLizer:
         pml = re.sub(r'(?mus)^[ ]*$', '', pml)
 
         # Footnotes and Sidebars.
-        pml = re.sub(r'(?mus)<footnote\s+id="(?P<target>.+?)">\s*(?P<text>.*?)\s*</footnote>', lambda match: '\\FN="%s"%s\\FN' %
-                     (match.group('target'), match.group('text')) if match.group('text') else '', pml)
-        pml = re.sub(r'(?mus)<sidebar\s+id="(?P<target>.+?)">\s*(?P<text>.*?)\s*</sidebar>', lambda match: '\\SB="%s"%s\\SB' %
-                     (match.group('target'), match.group('text')) if match.group('text') else '', pml)
+        pml = re.sub(
+            r'(?mus)<footnote\s+id="(?P<target>.+?)">\s*(?P<text>.*?)\s*</footnote>',
+            lambda match: '\\FN="{}"{}\\FN'.format(match.group('target'), match.group('text')) if match.group('text') else '',
+            pml,
+        )
+        pml = re.sub(
+            r'(?mus)<sidebar\s+id="(?P<target>.+?)">\s*(?P<text>.*?)\s*</sidebar>',
+            lambda match: '\\SB="{}"{}\\SB'.format(match.group('target'), match.group('text')) if match.group('text') else '',
+            pml,
+        )
 
         # Convert &'s into entities so &amp; in the text doesn't get turned into
         # &. It will display as &amp;
         pml = pml.replace('&', '&amp;')
 
         # Replace \\a and \\U with either the unicode character or the entity.
-        pml = re.sub(r'\\a(?P<num>\d{3})', lambda match: '&#%s;' % match.group('num'), pml)
-        pml = re.sub(r'\\U(?P<num>[0-9a-f]{4})', lambda match: '%s' % my_unichr(int(match.group('num'), 16)), pml)
+        pml = re.sub(r'\\a(?P<num>\d{3})', lambda match: '&#{};'.format(match.group('num')), pml)
+        pml = re.sub(r'\\U(?P<num>[0-9a-f]{4})', lambda match: '{}'.format(my_unichr(int(match.group('num'), 16))), pml)
 
         pml = prepare_string_for_xml(pml)
 
         return pml
 
-    def strip_pml(self, pml):
+    def strip_pml(self, pml: str) -> str:
         pml = re.sub(r'\\C\d=".*"', '', pml)
         pml = re.sub(r'\\Fn=".*"', '', pml)
         pml = re.sub(r'\\Sd=".*"', '', pml)
@@ -207,7 +222,7 @@ class PML_HTMLizer:
 
         return pml
 
-    def cleanup_html(self, html):
+    def cleanup_html(self, html: str) -> str:
         old = html
         html = self.cleanup_html_remove_redundant(html)
         while html != old:
@@ -216,17 +231,17 @@ class PML_HTMLizer:
         html = re.sub(r'(?imu)^\s*', '', html)
         return html
 
-    def cleanup_html_remove_redundant(self, html):
+    def cleanup_html_remove_redundant(self, html: str) -> str:
         for key in self.STATES_TAGS:
             open, close = self.STATES_TAGS[key]
             if key in self.STATES_VALUE_REQ:
                 html = re.sub(r'(?u){}\s*{}'.format(open % '.*?', close), '', html)
             else:
-                html = re.sub(fr'(?u){open}\s*{close}', '', html)
+                html = re.sub(rf'(?u){open}\s*{close}', '', html)
         html = re.sub(r'(?imu)<p>\s*</p>', '', html)
         return html
 
-    def start_line(self):
+    def start_line(self) -> str:
         start = ''
 
         state = deepcopy(self.state)
@@ -248,7 +263,7 @@ class PML_HTMLizer:
                 else:
                     other.append((key, val[1]))
 
-        for key, val in other+div+span:
+        for key, val in other + div + span:
             if key in self.STATES_VALUE_REQ:
                 start += self.STATES_TAGS[key][0] % val
             elif key in self.STATES_VALUE_REQ_2:
@@ -256,9 +271,9 @@ class PML_HTMLizer:
             else:
                 start += self.STATES_TAGS[key][0]
 
-        return '<p>%s' % start
+        return f'<p>{start}'
 
-    def end_line(self):
+    def end_line(self) -> str:
         end = ''
 
         div = []
@@ -273,23 +288,23 @@ class PML_HTMLizer:
                     span.append(key)
                 else:
                     other.append(key)
-        for key in span+div+other:
+        for key in span + div + other:
             if key in self.STATES_CLOSE_VALUE_REQ:
                 end += self.STATES_TAGS[key][1] % self.state[key][1]
             else:
                 end += self.STATES_TAGS[key][1]
 
-        return '%s</p>' % end
+        return f'{end}</p>'
 
-    def process_code(self, code, stream, pre=''):
+    def process_code(self, code: str, stream: io.StringIO, pre: str = '') -> str:
         text = ''
 
-        code = self.CODE_STATES.get(code, None)
+        code = self.CODE_STATES.get(code, '')
         if not code:
             return text
 
         if code in self.DIV_STATES:
-            # Ignore multilple T's on the same line. They do not have a closing
+            # Ignore multiple T's on the same line. They do not have a closing
             # code. They get closed at the end of the line.
             if code == 'T' and self.state['T'][0]:
                 self.code_value(stream)
@@ -306,7 +321,7 @@ class PML_HTMLizer:
 
         return text
 
-    def process_code_simple(self, code, stream):
+    def process_code_simple(self, code: str, stream: io.StringIO) -> str:
         text = ''
 
         if self.state[code][0]:
@@ -314,33 +329,32 @@ class PML_HTMLizer:
                 text = self.STATES_TAGS[code][1] % self.state[code][1]
             else:
                 text = self.STATES_TAGS[code][1]
-        else:
-            if code in self.STATES_VALUE_REQ or code in self.STATES_VALUE_REQ_2:
-                val = self.code_value(stream)
-                if code in self.STATES_VALUE_REQ:
-                    text = self.STATES_TAGS[code][0] % val
-                else:
-                    text = self.STATES_TAGS[code][0] % (val, val)
-                self.state[code][1] = val
+        elif code in self.STATES_VALUE_REQ or code in self.STATES_VALUE_REQ_2:
+            val = self.code_value(stream)
+            if code in self.STATES_VALUE_REQ:
+                text = self.STATES_TAGS[code][0] % val
             else:
-                text = self.STATES_TAGS[code][0]
+                text = self.STATES_TAGS[code][0] % (val, val)
+            self.state[code][1] = val
+        else:
+            text = self.STATES_TAGS[code][0]
 
         return text
 
-    def process_code_div(self, code, stream):
+    def process_code_div(self, code: str, stream: io.StringIO) -> str:
         text = ''
 
         # Close code.
         if self.state[code][0]:
             # Close all.
-            for c in self.SPAN_STATES+self.DIV_STATES:
+            for c in self.SPAN_STATES + self.DIV_STATES:
                 if self.state[c][0]:
                     if c in self.STATES_CLOSE_VALUE_REQ:
                         text += self.STATES_TAGS[c][1] % self.state[c][1]
                     else:
                         text += self.STATES_TAGS[c][1]
             # Reopen the based on state.
-            for c in self.DIV_STATES+self.SPAN_STATES:
+            for c in self.DIV_STATES + self.SPAN_STATES:
                 if code == c:
                     continue
                 if self.state[c][0]:
@@ -381,7 +395,7 @@ class PML_HTMLizer:
 
         return text
 
-    def process_code_span(self, code, stream):
+    def process_code_span(self, code: str, stream: io.StringIO) -> str:
         text = ''
 
         # Close code.
@@ -406,20 +420,19 @@ class PML_HTMLizer:
                     else:
                         text += self.STATES_TAGS[c][0]
         # Open code.
-        else:
-            if code in self.STATES_VALUE_REQ or code in self.STATES_VALUE_REQ_2:
-                val = self.code_value(stream)
-                if code in self.STATES_VALUE_REQ:
-                    text += self.STATES_TAGS[code][0] % val
-                else:
-                    text += self.STATES_TAGS[code][0] % (val, val)
-                self.state[code][1] = val
+        elif code in self.STATES_VALUE_REQ or code in self.STATES_VALUE_REQ_2:
+            val = self.code_value(stream)
+            if code in self.STATES_VALUE_REQ:
+                text += self.STATES_TAGS[code][0] % val
             else:
-                text += self.STATES_TAGS[code][0]
+                text += self.STATES_TAGS[code][0] % (val, val)
+            self.state[code][1] = val
+        else:
+            text += self.STATES_TAGS[code][0]
 
         return text
 
-    def process_code_block(self, code, stream, pre=''):
+    def process_code_block(self, code: str, stream: io.StringIO, pre: str = '') -> str:
         text = ''
 
         # Close all spans
@@ -436,21 +449,20 @@ class PML_HTMLizer:
                 text += self.STATES_TAGS[code][1] % self.state[code][1]
             else:
                 text += self.STATES_TAGS[code][1]
-        else:
-            # Open tag
-            if code in self.STATES_VALUE_REQ or code in self.STATES_VALUE_REQ_2:
-                val = self.code_value(stream)
-                if code in self.LINK_STATES:
-                    val = val.lstrip('#')
-                if pre:
-                    val = f'{pre}-{val}'
-                if code in self.STATES_VALUE_REQ:
-                    text += self.STATES_TAGS[code][0] % val
-                else:
-                    text += self.STATES_TAGS[code][0] % (val, val)
-                self.state[code][1] = val
+        # Open tag
+        elif code in self.STATES_VALUE_REQ or code in self.STATES_VALUE_REQ_2:
+            val = self.code_value(stream)
+            if code in self.LINK_STATES:
+                val = val.lstrip('#')
+            if pre:
+                val = f'{pre}-{val}'
+            if code in self.STATES_VALUE_REQ:
+                text += self.STATES_TAGS[code][0] % val
             else:
-                text += self.STATES_TAGS[code][0]
+                text += self.STATES_TAGS[code][0] % (val, val)
+            self.state[code][1] = val
+        else:
+            text += self.STATES_TAGS[code][0]
 
         # Re-open all spans if code was a div based on state
         for c in self.SPAN_STATES:
@@ -464,7 +476,7 @@ class PML_HTMLizer:
 
         return text
 
-    def code_value(self, stream):
+    def code_value(self, stream: io.StringIO) -> str:
         value = ''
         # state 0 is before =
         # state 1 is before the first "
@@ -508,7 +520,7 @@ class PML_HTMLizer:
 
         return value.strip()
 
-    def parse_pml(self, pml, file_name=''):
+    def parse_pml(self, pml: str, file_name: str = '') -> str:
         pml = self.prepare_pml(pml)
         output = []
 
@@ -582,14 +594,14 @@ class PML_HTMLizer:
                             text = self.process_code('Sd', line, 'sb')
                     elif c in 'xXC':
                         empty = False
-                        # The PML was modified eariler so x and X put the text
+                        # The PML was modified earlier so x and X put the text
                         # inside of ="" so we don't have do special processing
                         # for C.
                         t = ''
                         level = 0
                         if c in 'XC':
                             level = line.read(1)
-                        id = 'pml_toc-%s' % len(self.toc)
+                        id = f'pml_toc-{len(self.toc)}'
                         value = self.code_value(line)
                         if c == 'x':
                             t = self.process_code(c, line)
@@ -603,11 +615,11 @@ class PML_HTMLizer:
                     elif c == 'm':
                         empty = False
                         src = self.code_value(line)
-                        text = '<img src="images/%s" />' % src
+                        text = f'<img src="images/{src}" />'
                     elif c == 'Q':
                         empty = False
                         id = self.code_value(line)
-                        text = '<span id="%s"></span>' % id
+                        text = f'<span id="{id}"></span>'
                     elif c == 'p':
                         empty = False
                         text = '<br /><br style="page-break-after: always;" />'
@@ -615,7 +627,7 @@ class PML_HTMLizer:
                         pass
                     elif c == 'w':
                         empty = False
-                        text = '<hr style="width: %s" />' % self.code_value(line)
+                        text = f'<hr style="width: {self.code_value(line)}" />'
                     elif c == 't':
                         indent_state['t'] = not indent_state['t']
                     elif c == 'T':
@@ -678,8 +690,8 @@ class PML_HTMLizer:
 
         return output
 
-    def get_toc(self):
-        '''
+    def get_toc(self) -> TOC:
+        """
         Toc can have up to 5 levels, 0 - 4 inclusive.
 
         This function will add items to their appropriate
@@ -687,7 +699,7 @@ class PML_HTMLizer:
         invalid (item would not have a valid parent) add
         it to the next valid level above the specified
         level.
-        '''
+        """
         # Base toc object all items will be added to.
         n_toc = TOC()
         # Used to track nodes in the toc so we can add
@@ -747,24 +759,25 @@ class PML_HTMLizer:
         return n_toc
 
 
-def pml_to_html(pml):
+def pml_to_html(pml: str) -> str:
     hizer = PML_HTMLizer()
     return hizer.parse_pml(pml)
 
 
-def footnote_sidebar_to_html(pre_id, id, pml):
+def footnote_sidebar_to_html(pre_id: str, id: str, pml: str) -> str:
     id = id.strip('\x01')
     if id.strip():
-        html = '<br /><br style="page-break-after: always;" /><div id="{}-{}">{}<small><a href="#r{}-{}">return</a></small></div>'.format(
-            pre_id, id, pml_to_html(pml), pre_id, id)
+        html = (
+            f'<br /><br style="page-break-after: always;" /><div id="{pre_id}-{id}">{pml_to_html(pml)}<small><a href="#r{pre_id}-{id}">return</a></small></div>'
+        )
     else:
-        html = '<br /><br style="page-break-after: always;" /><div>%s</div>' % pml_to_html(pml)
+        html = f'<br /><br style="page-break-after: always;" /><div>{pml_to_html(pml)}</div>'
     return html
 
 
-def footnote_to_html(id, pml):
+def footnote_to_html(id: str, pml: str) -> str:
     return footnote_sidebar_to_html('fn', id, pml)
 
 
-def sidebar_to_html(id, pml):
+def sidebar_to_html(id: str, pml: str) -> str:
     return footnote_sidebar_to_html('sb', id, pml)
